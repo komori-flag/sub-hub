@@ -310,6 +310,56 @@ shed response: # SERVER_BUSY: too many conversions already queued
 
 ---
 
+## CI / CD
+
+仓库已经 `git init` 并做好了首次提交，`main` 为默认分支。workflow 都在
+[.github/workflows/](.github/workflows/) 里。
+
+### 建远程仓库并推送
+
+在 GitHub 网页新建一个**空**仓库（不要勾选 README / .gitignore / license，
+否则会跟本地历史冲突），然后：
+
+```bash
+cd /c/ScriptTestFile/sub-hub
+git remote add origin git@github.com:<你的用户名>/sub-hub.git
+git push -u origin main
+```
+
+用 HTTPS 就把地址换成 `https://github.com/<你的用户名>/sub-hub.git`。
+
+### CI（[ci.yml](.github/workflows/ci.yml)）
+
+push 到 `main` 和所有 PR 触发：`npm ci` → typecheck → 测试 → 构建 → 断言
+`dist/index.js` 存在。同一分支连续 push 会取消上一次运行。
+
+### 发版（[release.yml](.github/workflows/release.yml)）
+
+打 tag 即发版：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+会依次做：
+
+1. 先跑 typecheck + 测试 —— **tag 可以打在任何一个 commit 上，包括没过 CI 的**，
+   所以这里必须再验一遍，避免把坏镜像发出去
+2. 构建 **linux/amd64 + linux/arm64** 多架构镜像推到 GHCR
+3. 创建 GitHub Release（自动生成变更说明）
+
+镜像地址就是 `ghcr.io/<用户名>/sub-hub`，workflow 用 `${GITHUB_REPOSITORY,,}`
+自动推导并转小写（GHCR 不接受大写）。
+
+> arm64 是 QEMU 模拟构建，大约让 job 时间翻倍。确定目标是 x86 的话，把
+> `platforms:` 里的 `linux/arm64` 删掉即可。两种架构都不需要编译器 ——
+> better-sqlite3 自带对应的预编译包。
+
+**私有仓库的镜像也是私有的**，VPS 拉取前需要登录（见下）。
+
+---
+
 ## 部署到公网
 
 ### 推荐拓扑：都放同一台 VPS
@@ -333,28 +383,42 @@ sudo usermod -aG docker $USER
 
 重新登录一次让组权限生效（否则每条 docker 命令都要 `sudo`）。
 
-#### 2. 把代码传上去
+#### 2. 拿代码 —— 两种方式
 
-这个项目目前**不是 git 仓库**，所以 VPS 上没法 `git clone`。压缩后只有 55K ——
-`node_modules/` 会在容器里重建，`dist/`、`data/`、`.env` 是本地状态，都不该传。
+**方式 A：用 CI 发布的镜像（推荐）**
 
-在本机（Git Bash）执行：
+VPS 上完全不做构建，所以既没有「小内存构建 OOM」的问题，也不用等编译。前提是按
+上面的 CI/CD 章节打过 tag。
 
 ```bash
+git clone git@github.com:<你的用户名>/sub-hub.git ~/sub-hub && cd ~/sub-hub
+
+# 私有仓库的镜像也是私有的，拉之前要登录。PAT 需要 read:packages 权限
+echo "$CR_PAT" | docker login ghcr.io -u <你的用户名> --password-stdin
+
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+```
+
+**方式 B：传源码，在 VPS 上构建**
+
+不想依赖镜像仓库、或者还没发过 release 时用。压缩后只有 55K：
+
+```bash
+# 本机（Git Bash）
 cd /c/ScriptTestFile/sub-hub
 tar czf /tmp/sub-hub.tgz \
   --exclude=node_modules --exclude=dist --exclude=data --exclude=.env .
 scp /tmp/sub-hub.tgz your-user@your-vps:~/
-```
 
-在 VPS 上解包：
-
-```bash
+# VPS
 mkdir -p ~/sub-hub && tar xzf ~/sub-hub.tgz -C ~/sub-hub && cd ~/sub-hub
 ```
 
-> 想省掉以后每次手工传，可以 `git init` 后推到一个**私有**仓库再从 VPS clone。
-> `.gitignore` 已经排除了 `node_modules/`、`dist/`、`data/`、`.env`。
+也可以直接 `git clone`（仓库现在有了），然后走下面的构建路径 —— 但那样每台 VPS 都要
+自己编译一遍，正是方式 A 想省掉的。
+
+> `node_modules/`、`dist/`、`data/`、`.env` 都不该传：前者会在容器里重建，后三者是
+> 本地状态。`.gitignore` 和 `.dockerignore` 都已经排除。
 
 #### 3. 修 `data/` 权限 —— 这一步漏掉必挂
 
@@ -391,10 +455,39 @@ sub.example.com   ->   http://app:3000
 
 #### 6. 起服务
 
+方式 A（镜像）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+  --profile tunnel up -d
+```
+
+方式 B（本地构建）：
+
 ```bash
 docker compose --profile tunnel up -d --build
+```
+
+> **方式 A 不要加 `--build`。** 基础 compose 里仍然有 `build: .`，image 不存在时
+> compose 会退回去自己编译 —— 正是这个 overlay 想避免的那条路。
+
+两种方式都可以把 overlay 写进 `.env` 省掉 `-f` 参数：
+
+```
+COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+```
+
+之后就是 `docker compose --profile tunnel up -d`。
+
+```bash
 docker compose ps          # 两个容器都应为 Up
 docker compose logs -f app
+```
+
+想固定版本（`latest` 是可变标签，重新部署会悄悄换掉你在跑的版本）：
+
+```bash
+IMAGE_TAG=v1.0.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 #### 7. 验证
