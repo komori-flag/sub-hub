@@ -1,0 +1,17 @@
+# Normalize line endings to LF in the repository AND in the working tree.
+#
+# Not just tidiness. The Dockerfile is consumed by Docker on Linux, and a CRLF
+# line ending turns the HEALTHCHECK's exec-form JSON into
+#   ["node", "-e", "...\r"]
+# where the carriage return becomes part of the argument. Git for Windows
+# defaults to core.autocrlf=true, so without this rule a Windows checkout is
+# not byte-identical to what the container expects.
+* text=auto eol=lf
+
+# Never touch binaries.
+*.node binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.gz binary
+*.tgz binary

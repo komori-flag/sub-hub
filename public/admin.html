@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sub-hub — admin</title>
+<style>
+  :root { color-scheme: dark light; --fg: light-dark(#111, #e8e8e8); --bg: light-dark(#fff, #16181d); --line: light-dark(#ddd, #34383f); --muted: light-dark(#666, #9aa0a6); --acc: light-dark(#0b62d0, #6cb0ff); }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 20px; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .01em; }
+  h2 { font-size: 15px; margin: 26px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+  p.hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+  th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 13px; vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  tr.invalid td { background: light-dark(#fff2f2, #3a1f1f); }
+  form { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  input, select, button { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); }
+  input:focus, select:focus { outline: 2px solid var(--acc); outline-offset: -1px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.danger:hover { border-color: #e5484d; color: #e5484d; }
+  label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; }
+  label.chk input { padding: 0; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+  #bar input { flex: 1; min-width: 240px; font-family: ui-monospace, Consolas, monospace; }
+  #msg { font-size: 13px; }
+  #msg.err { color: #e5484d; }
+  #msg.ok { color: light-dark(#1a7f37, #4cc46a); }
+  .empty { color: var(--muted); font-style: italic; padding: 8px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: light-dark(#f2f2f2, #24272d); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>sub-hub</h1>
+  <p class="hint">Subscription manager &amp; short-link converter. The token is stored in this browser's localStorage and sent as an <code>Authorization</code> header.</p>
+
+  <div id="bar">
+    <input id="tok" type="password" placeholder="ADMIN_TOKEN" autocomplete="off" spellcheck="false">
+    <button id="save">Save &amp; load</button>
+    <span id="msg"></span>
+  </div>
+
+  <h2>Subscriptions</h2>
+  <form id="sf">
+    <input id="sid" size="16" placeholder="id (blank = auto)" autocomplete="off">
+    <input id="sname" size="16" placeholder="name" required autocomplete="off">
+    <input id="surl" size="42" placeholder="https://example.com/subscribe?token=..." required autocomplete="off">
+    <label class="chk"><input id="sen" type="checkbox" checked> enabled</label>
+    <button>Save</button>
+  </form>
+  <table id="st">
+    <thead><tr><th>id</th><th>name</th><th>url</th><th>enabled</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Profiles <span class="hint">(short links)</span></h2>
+  <form id="pf">
+    <input id="pkey" size="14" placeholder="key" required autocomplete="off">
+    <select id="ptarget"></select>
+    <input id="pids" size="26" placeholder="source ids, comma separated" required autocomplete="off">
+    <input id="pcfg" size="20" placeholder="custom_ruleset (optional)" autocomplete="off">
+    <input id="pexc" size="16" placeholder="exclude_remarks (optional)" autocomplete="off">
+    <label class="chk"><input id="pudp" type="checkbox" checked> udp</label>
+    <button>Save</button>
+  </form>
+  <table id="pt">
+    <thead><tr><th>key</th><th>target</th><th>sources</th><th>udp</th><th>short link</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+
+<script>
+'use strict';
+
+var TARGETS = ['clash','clashr','clashm','mihomo','surge','surfboard','loon','singbox','v2ray','v2rayn','trojan','mixed','auto'];
+var TOKEN_KEY = 'subhub_token';
+
+function $(id) { return document.getElementById(id); }
+
+function setMsg(text, cls) {
+  var m = $('msg');
+  m.textContent = text;
+  m.className = cls || '';
+}
+
+function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+
+// Every rendered value goes through textContent, never innerHTML. Names,
+// URLs and keys are user-supplied strings, so this makes stored XSS
+// structurally impossible rather than a thing to remember.
+function cell(tr, text, className) {
+  var td = document.createElement('td');
+  td.textContent = text;
+  if (className) td.className = className;
+  tr.appendChild(td);
+  return td;
+}
+
+function api(method, path, body) {
+  var headers = { 'Accept': 'application/json' };
+  if (token()) headers['Authorization'] = 'Bearer ' + token();
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  return fetch('/api' + path, {
+    method: method,
+    headers: headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  }).then(function (res) {
+    if (res.status === 204) return null;
+    return res.text().then(function (text) {
+      var data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+      if (!res.ok) {
+        var detail = data && data.error && data.error.message ? data.error.message : 'HTTP ' + res.status;
+        if (data && data.error && data.error.details && data.error.details.length) {
+          detail += ': ' + data.error.details.map(function (d) {
+            return d.field + ' ' + d.message;
+          }).join('; ');
+        }
+        throw new Error(detail);
+      }
+      return data;
+    });
+  });
+}
+
+function row(tbody, values) {
+  var tr = document.createElement('tr');
+  for (var i = 0; i < values.length; i++) cell(tr, values[i], i === values.length - 1 ? null : 'mono');
+  tbody.appendChild(tr);
+  return tr;
+}
+
+function deleteButton(tr, path, label) {
+  var td = document.createElement('td');
+  var b = document.createElement('button');
+  b.textContent = label || 'delete';
+  b.className = 'danger';
+  b.onclick = function () {
+    api('DELETE', path).then(refresh).then(function () { setMsg('deleted', 'ok'); }).catch(fail);
+  };
+  td.appendChild(b);
+  tr.appendChild(td);
+}
+
+function linkCell(tr, href) {
+  var td = document.createElement('td');
+  var a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noreferrer';
+  a.textContent = 'open';
+  td.appendChild(a);
+  tr.appendChild(td);
+}
+
+function emptyRow(tbody, colspan, text) {
+  var tr = document.createElement('tr');
+  var td = document.createElement('td');
+  td.colSpan = colspan;
+  td.className = 'empty';
+  td.textContent = text;
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+
+function fail(err) { setMsg(err.message, 'err'); }
+
+function refresh() {
+  return Promise.all([api('GET', '/subscriptions'), api('GET', '/profiles')]).then(function (res) {
+    var subs = res[0].data;
+    var profs = res[1].data;
+
+    var st = $('st').tBodies[0];
+    st.textContent = '';
+    if (subs.length === 0) {
+      emptyRow(st, 5, 'no subscriptions yet');
+    } else {
+      subs.forEach(function (s) {
+        var tr = row(st, [s.id, s.name, s.url, s.enabled ? 'yes' : 'no']);
+        deleteButton(tr, '/subscriptions/' + encodeURIComponent(s.id));
+      });
+    }
+
+    var pt = $('pt').tBodies[0];
+    pt.textContent = '';
+    if (profs.length === 0) {
+      emptyRow(pt, 6, 'no profiles yet');
+    } else {
+      profs.forEach(function (p) {
+        var tr = row(pt, [
+          p.key,
+          p.target,
+          p.sourceIdsValid ? (p.sourceIds.length ? p.sourceIds.join(', ') : '(none)') : 'INVALID JSON',
+          p.udp ? 'yes' : 'no'
+        ]);
+        if (!p.sourceIdsValid) tr.className = 'invalid';
+        linkCell(tr, '/s/' + encodeURIComponent(p.key));
+        deleteButton(tr, '/profiles/' + encodeURIComponent(p.key));
+      });
+    }
+
+    setMsg(subs.length + ' subscription(s), ' + profs.length + ' profile(s)', 'ok');
+  }).catch(fail);
+}
+
+TARGETS.forEach(function (t) {
+  var o = document.createElement('option');
+  o.value = t;
+  o.textContent = t;
+  $('ptarget').appendChild(o);
+});
+
+$('save').onclick = function () {
+  localStorage.setItem(TOKEN_KEY, $('tok').value.trim());
+  refresh();
+};
+
+$('sf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var body = { name: $('sname').value.trim(), url: $('surl').value.trim(), enabled: $('sen').checked };
+  var id = $('sid').value.trim();
+  if (id) body.id = id;
+  api('POST', '/subscriptions', body)
+    .then(function () { $('sid').value = ''; $('surl').value = ''; refresh(); })
+    .catch(fail);
+};
+
+$('pf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var ids = $('pids').value.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
+  var body = {
+    key: $('pkey').value.trim(),
+    target: $('ptarget').value,
+    sourceIds: ids,
+    customRuleset: $('pcfg').value.trim() || null,
+    excludeRemarks: $('pexc').value.trim() || null,
+    udp: $('pudp').checked
+  };
+  api('POST', '/profiles', body).then(function (res) {
+    // A warning is not a failure - the write succeeded - but it is the most
+    // likely cause of a later 502, so surface it instead of saying "saved".
+    if (res && res.warnings && res.warnings.length) { setMsg(res.warnings.join('; '), 'err'); }
+    refresh();
+  }).catch(fail);
+};
+
+$('tok').value = token();
+if (token()) { refresh(); } else { setMsg('enter your ADMIN_TOKEN to begin'); }
+</script>
+</body>
+</html>

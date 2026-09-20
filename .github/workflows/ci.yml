@@ -1,0 +1,36 @@
+name: CI
+
+# Runs on every push to main and every PR. Catches a broken build before it
+# becomes a tag, which is what the Release workflow keys off.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel an in-progress run when the same branch is pushed again - the older
+# run's result is already irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # .npmrc sets engine-strict, so a mismatch fails npm ci
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # A build that produced no entrypoint would sail through `tsc` but fail
+      # at `node dist/index.js` in the container. Cheap to assert here.
+      - name: Assert the build artifact exists
+        run: test -f dist/index.js

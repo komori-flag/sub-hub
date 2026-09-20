@@ -1,0 +1,92 @@
+name: Release
+
+# Tag-driven. Cut a version with:
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# Produces a multi-arch image on GHCR and a GitHub Release. The VPS then runs
+# `docker compose pull` instead of building, which also removes the "small VPS
+# runs out of memory compiling" failure mode entirely.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the GitHub Release
+  packages: write # push the image to GHCR
+
+jobs:
+  # Gate the publish on the same checks CI runs. A tag can be pushed from any
+  # commit, including one that never went through CI.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  image:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 is built under emulation. It roughly doubles the job's wall
+      # time; drop it from `platforms` below if you know the target is x86.
+      # Better-sqlite3 ships native linux-arm64 prebuilds, so no compiler is
+      # needed on either architecture.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR rejects uppercase in image names, and github.repository preserves
+      # whatever case the repo was created with, so normalise it here rather
+      # than discovering the problem on the first tag.
+      - name: Compute image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            Multi-arch container image published to GHCR:
+
+            ```
+            docker pull ${{ steps.img.outputs.name }}:${{ github.ref_name }}
+            ```
+
+            Deploy with the prod compose overlay — see the README's
+            "部署到公网" section.
