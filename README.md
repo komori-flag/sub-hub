@@ -328,6 +328,10 @@ git push -u origin main
 
 用 HTTPS 就把地址换成 `https://github.com/<你的用户名>/sub-hub.git`。
 
+> **远程名叫什么都行，但下文命令里写的是 `origin`。** 如果你建远程时用了别的名字
+> （`git remote -v` 可以查），把下面所有命令里的 `origin` 换成那个名字，否则
+> `git push origin v1.0.0` 会直接报 `'origin' does not appear to be a git repository`。
+
 ### CI（[ci.yml](.github/workflows/ci.yml)）
 
 push 到 `main` 和所有 PR 触发：`npm ci` → typecheck → 测试 → 构建 → 断言
