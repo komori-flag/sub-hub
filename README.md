@@ -360,7 +360,12 @@ git push origin v1.0.0
 > `platforms:` 里的 `linux/arm64` 删掉即可。两种架构都不需要编译器 ——
 > better-sqlite3 自带对应的预编译包。
 
-**私有仓库的镜像也是私有的**，VPS 拉取前需要登录（见下）。
+**包的可见性和仓库是分开设置的。** 把仓库改成 public **不会**自动把包也改掉 ——
+GHCR 上要单独改（Packages 页面 → Package settings → Change visibility）。包保持私有时，
+VPS 拉取前需要登录（见下）；改成 public 就能免登录拉取。
+
+镜像里只有代码，没有任何配置或密钥 —— `ADMIN_TOKEN` 之类都是运行时从环境变量注入的。
+仓库已经公开的话，把包也设为 public 不会带来额外暴露。
 
 ---
 
@@ -397,7 +402,8 @@ VPS 上完全不做构建，所以既没有「小内存构建 OOM」的问题，
 ```bash
 git clone git@github.com:<你的用户名>/sub-hub.git ~/sub-hub && cd ~/sub-hub
 
-# 私有仓库的镜像也是私有的，拉之前要登录。PAT 需要 read:packages 权限
+# 包是私有的话，拉之前要登录（PAT 需要 read:packages 权限）。
+# 包设为 public 则这一步可以跳过，后面几条命令照常。
 echo "$CR_PAT" | docker login ghcr.io -u <你的用户名> --password-stdin
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml pull

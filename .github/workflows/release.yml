@@ -19,7 +19,11 @@ jobs:
   # Gate the publish on the same checks CI runs. A tag can be pushed from any
   # commit, including one that never went through CI.
   verify:
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`. The floating label is scheduled to move to
+    # Ubuntu 26 in October 2026, and this job builds a native module for two
+    # architectures, so a changed toolchain/glibc is exactly the kind of thing
+    # that breaks it. Bump deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,7 +36,11 @@ jobs:
 
   image:
     needs: verify
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`. The floating label is scheduled to move to
+    # Ubuntu 26 in October 2026, and this job builds a native module for two
+    # architectures, so a changed toolchain/glibc is exactly the kind of thing
+    # that breaks it. Bump deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
