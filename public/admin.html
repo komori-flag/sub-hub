@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>sub-hub 管理控制台</title>
+<style>
+  :root { color-scheme: dark light; --fg: light-dark(#111, #e8e8e8); --bg: light-dark(#fff, #16181d); --line: light-dark(#ddd, #34383f); --muted: light-dark(#666, #9aa0a6); --acc: light-dark(#0b62d0, #6cb0ff); }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 20px; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: .01em; }
+  h2 { font-size: 15px; margin: 26px 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--line); }
+  p.hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+  th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; font-size: 13px; vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  td.tpl { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.none { color: var(--muted); }
+  tr.invalid td { background: light-dark(#fff2f2, #3a1f1f); }
+  tr.lvl-warn td { background: light-dark(#fffbe8, #3a3520); }
+  tr.lvl-err td { background: light-dark(#fff0f0, #3a1f1f); }
+  td.dim { color: var(--muted); }
+  h2 button { font-size: 12px; font-weight: 400; padding: 2px 9px; margin-left: 6px; vertical-align: middle; }
+  input[type=number] { width: 5.5em; }
+  form { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  input, select, button { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); }
+  input:focus, select:focus { outline: 2px solid var(--acc); outline-offset: -1px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.danger:hover { border-color: #e5484d; color: #e5484d; }
+  label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; }
+  label.chk input { padding: 0; }
+  #bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+  #bar input { flex: 1; min-width: 240px; font-family: ui-monospace, Consolas, monospace; }
+  #msg { font-size: 13px; }
+  #msg.err { color: #e5484d; }
+  #msg.ok { color: light-dark(#1a7f37, #4cc46a); }
+  .empty { color: var(--muted); font-style: italic; padding: 8px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: light-dark(#f2f2f2, #24272d); padding: 1px 5px; border-radius: 4px; }
+  textarea { width: 100%; margin-top: 8px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.45; padding: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); resize: vertical; }
+  textarea:focus { outline: 2px solid var(--acc); outline-offset: -1px; }
+  textarea.editing { border-color: var(--acc); }
+  #pids { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: center; border: 1px solid var(--line); border-radius: 5px; padding: 5px 9px; min-width: 220px; max-width: 430px; max-height: 92px; overflow-y: auto; }
+  #pids label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+  #pids label input { padding: 0; }
+  #pids .empty { color: var(--muted); font-style: italic; font-size: 13px; }
+  #pids label.off { color: var(--muted); }
+  #pcfgs { display: flex; flex-wrap: wrap; gap: 3px 12px; align-items: center; border: 1px solid var(--line); border-radius: 5px; padding: 5px 9px; min-width: 200px; max-width: 420px; max-height: 92px; overflow-y: auto; }
+  #pcfgs label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap; }
+  #pcfgs label input { padding: 0; }
+  td.toggle { text-align: center; }
+  td.toggle input { padding: 0; cursor: pointer; }
+  td.toggle input:disabled { cursor: wait; }
+</style>
+</head>
+<body>
+<main>
+  <h1>sub-hub</h1>
+  <p class="hint">订阅管理与短链转换。token 保存在本浏览器的 localStorage 里，通过 <code>Authorization</code> 请求头发送。</p>
+
+  <div id="bar">
+    <input id="tok" type="password" placeholder="ADMIN_TOKEN" autocomplete="off" spellcheck="false">
+    <button id="save">保存并加载</button>
+    <span id="msg"></span>
+  </div>
+
+  <h2>订阅源 <button id="checknow" type="button">立即检查</button></h2>
+  <form id="sf">
+    <input id="sid" size="16" placeholder="id（留空则自动生成）" autocomplete="off">
+    <input id="sname" size="16" placeholder="名称" required autocomplete="off">
+    <input id="surl" size="42" placeholder="https://example.com/subscribe?token=..." required autocomplete="off">
+    <label class="chk"><input id="sen" type="checkbox" checked> 启用</label>
+    <button>保存</button>
+  </form>
+  <table id="st">
+    <thead><tr><th>id</th><th>名称</th><th>地址</th><th>启用</th><th>状态</th><th>剩余流量</th><th>到期</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>规则模板 <span class="hint">（短链配置里的模板，可选）</span></h2>
+  <p class="hint">只是给下面的「模板」下拉框提供选项。改或删都不会影响已有配置 —— 短链里存的是 URL 本身。</p>
+  <form id="rf">
+    <input id="rid" size="16" placeholder="id（留空则自动生成）" autocomplete="off">
+    <input id="rname" size="16" placeholder="名称" required autocomplete="off">
+    <input id="rurl" size="46" placeholder="https://example.com/rules.ini" required autocomplete="off">
+    <button>保存</button>
+  </form>
+  <table id="rt">
+    <thead><tr><th>id</th><th>名称</th><th>地址</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>本地模板 <span class="hint">（存在 sub-hub 里，适合不能公开的内容）</span></h2>
+  <p class="hint">和「规则模板」的区别：那些是 URL，模板内容在别处；这些存在这里，不会离开这台机器 —— 内网地址、穿透规则之类不该公开的东西放这边。</p>
+  <form id="tf">
+    <input id="tid" size="16" placeholder="id（留空则自动生成）" autocomplete="off">
+    <input id="tname" size="20" placeholder="名称" required autocomplete="off">
+    <button>保存</button>
+    <button type="button" id="tnew">新建</button>
+  </form>
+  <textarea id="tcontent" rows="10" spellcheck="false" placeholder="[custom]&#10;custom_proxy_group=Proxy`select`.*&#10;..."></textarea>
+  <table id="tt">
+    <thead><tr><th>id</th><th>名称</th><th>大小</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>短链配置 <span class="hint">（即对外暴露的短链）</span></h2>
+  <form id="pf">
+    <input id="pkey" size="14" placeholder="key" required autocomplete="off">
+    <select id="ptarget"></select>
+    <div id="pids"></div>
+    <div id="pcfgs" title="规则模板，对应 Subconverter 的 config= 参数"></div>
+    <input id="pcfg" size="18" placeholder="模板 URL" autocomplete="off" hidden>
+    <input id="pexc" size="16" placeholder="过滤正则（可选）" autocomplete="off">
+    <label class="chk"><input id="pudp" type="checkbox" checked> udp</label>
+    <label class="chk" title="是否在短链响应里告诉客户端多久更新一次。只是建议——客户端自己的自动更新设置优先"><input id="pauto" type="checkbox" checked> 自动更新</label>
+    <input id="piv" type="number" min="1" max="168" step="1" value="24" title="更新间隔，小时（1–168）" autocomplete="off">
+    <label class="chk" title="给每个节点名加上它所属订阅源的前缀：[机场甲] HK-01。开启后每次缓存未命中都要为每个源多转换一次，以确定节点归属；若两个源有同名节点则自动跳过不加"><input id="pprefix" type="checkbox"> 节点名加源前缀</label>
+    <label class="chk" title="给每个订阅源建一个组，客户端里可以直接选「用哪个机场」。只会在配置末尾追加，不修改模板生成的任何现有组；组名与现有组冲突时整体跳过并记日志"><input id="pgroups" type="checkbox"> 按源分组</label>
+    <label class="chk" title="select＝手动选；url-test＝组内自动测速；fallback＝按顺序容灾；load-balance＝负载均衡">类型
+      <select id="pgtype">
+        <option value="select">select</option>
+        <option value="url-test">url-test</option>
+        <option value="fallback">fallback</option>
+        <option value="load-balance">load-balance</option>
+      </select>
+    </label>
+    <input id="pgurl" size="34" placeholder="测速地址" autocomplete="off" hidden>
+    <label class="chk" id="pgint-wrap" hidden>间隔 <input id="pgint" type="number" min="10" max="86400" step="10" value="300"></label>
+    <label class="chk" id="pgtol-wrap" hidden>容差 <input id="pgtol" type="number" min="0" max="5000" step="10" value="50"></label>
+    <label class="chk" title="将分流规则全部展开到配置文件中。true 会把规则全文写进订阅，体积大十倍以上；false 用 rule-providers 让客户端自己拉取并缓存">分流规则展开
+      <select id="pexpand">
+        <option value="false">false</option>
+        <option value="true">true</option>
+      </select>
+    </label>
+    <button>保存</button>
+  </form>
+  <table id="pt">
+    <thead><tr><th>key</th><th>目标</th><th>订阅源</th><th>规则模板</th><th>udp</th><th>分流规则展开</th><th>更新间隔</th><th>节点前缀</th><th>短链</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+
+<script>
+'use strict';
+
+var TARGETS = ['clash','clashr','clashm','mihomo','surge','surfboard','loon','singbox','v2ray','v2rayn','trojan','mixed','auto'];
+var TOKEN_KEY = 'subhub_token';
+
+// Last loaded data, so the source picker can be rebuilt from a cached list
+// instead of refetching, and so typing an existing key can prefill the form.
+var ALL_SUBS = [];
+var ALL_PROFS = [];
+var ALL_RULESETS = [];
+// Latest check per source, from /api/sources/health. Severity comes from the
+// server (check.level) rather than being recomputed here, so the page cannot
+// disagree with what the log called the same result.
+var ALL_CHECKS = [];
+// Locally stored templates. The content is only fetched when editing, not on
+// every refresh - a list view does not need every document.
+var ALL_TEMPLATES = [];
+
+// Sentinel for the template dropdown's "type it myself" entry. Cannot collide
+// with a real value because the other values are URLs.
+var CUSTOM_TEMPLATE = '__custom__';
+
+function $(id) { return document.getElementById(id); }
+
+function setMsg(text, cls) {
+  var m = $('msg');
+  m.textContent = text;
+  m.className = cls || '';
+}
+
+function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+
+// Every rendered value goes through textContent, never innerHTML. Names,
+// URLs and keys are user-supplied strings, so this makes stored XSS
+// structurally impossible rather than a thing to remember.
+function cell(tr, text, className) {
+  var td = document.createElement('td');
+  td.textContent = text;
+  if (className) td.className = className;
+  tr.appendChild(td);
+  return td;
+}
+
+function api(method, path, body) {
+  var headers = { 'Accept': 'application/json' };
+  if (token()) headers['Authorization'] = 'Bearer ' + token();
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  return fetch('/api' + path, {
+    method: method,
+    headers: headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  }).then(function (res) {
+    if (res.status === 204) return null;
+    return res.text().then(function (text) {
+      var data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+      if (!res.ok) {
+        var detail = data && data.error && data.error.message ? data.error.message : 'HTTP ' + res.status;
+        if (data && data.error && data.error.details && data.error.details.length) {
+          detail += ': ' + data.error.details.map(function (d) {
+            return d.field + ' ' + d.message;
+          }).join('; ');
+        }
+        throw new Error(detail);
+      }
+      return data;
+    });
+  });
+}
+
+function deleteButton(tr, path, label) {
+  var td = document.createElement('td');
+  var b = document.createElement('button');
+  b.textContent = label || '删除';
+  b.className = 'danger';
+  b.onclick = function () {
+    api('DELETE', path).then(refresh).then(function () { setMsg('已删除', 'ok'); }).catch(fail);
+  };
+  td.appendChild(b);
+  tr.appendChild(td);
+}
+
+function linkCell(tr, href) {
+  var td = document.createElement('td');
+  var a = document.createElement('a');
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noreferrer';
+  a.textContent = '打开';
+  td.appendChild(a);
+  tr.appendChild(td);
+}
+
+function emptyRow(tbody, colspan, text) {
+  var tr = document.createElement('tr');
+  var td = document.createElement('td');
+  td.colSpan = colspan;
+  td.className = 'empty';
+  td.textContent = text;
+  tr.appendChild(td);
+  tbody.appendChild(tr);
+}
+
+/**
+ * A live enabled toggle in the table.
+ *
+ * Without this the flag could only be set while creating a subscription:
+ * changing it meant retyping the id, name and url to upsert the row, and a
+ * typo there overwrites the real values. A control that can only be used once,
+ * at creation, is not much of a control.
+ *
+ * POST is a full replace, so the whole row is sent back - the in-memory copy
+ * came from the last refresh, so it is current.
+ */
+function enabledCell(tr, sub) {
+  var td = document.createElement('td');
+  td.className = 'toggle';
+  var cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = sub.enabled;
+  cb.title = sub.enabled ? '已启用，点击停用' : '已停用，点击启用';
+  cb.onchange = function () {
+    cb.disabled = true;
+    api('POST', '/subscriptions', {
+      id: sub.id, name: sub.name, url: sub.url, enabled: cb.checked
+    }).then(refresh).catch(function (err) {
+      // The write failed, so the box no longer reflects the server. Put it
+      // back rather than leaving the UI showing a state that is not stored.
+      cb.checked = sub.enabled;
+      cb.disabled = false;
+      fail(err);
+    });
+  };
+  td.appendChild(cb);
+  tr.appendChild(td);
+  return td;
+}
+
+function fail(err) { setMsg(err.message, 'err'); }
+
+/* ------------------------------------------------------------------ *
+ * Source picker
+ *
+ * Replaces a free-text "source ids, comma separated" field. The only valid
+ * values are ids that already exist, so typing them by hand could only
+ * produce typos - and a typo does not error, it silently yields a profile
+ * that resolves to fewer sources than intended.
+ *
+ * Checkboxes rather than <select multiple>: multi-select needs Ctrl+click on
+ * Windows, and a long option list gives no indication of what is currently
+ * selected once it scrolls.
+ * ------------------------------------------------------------------ */
+
+function selectedSourceIds() {
+  var boxes = $('pids').querySelectorAll('input[type=checkbox]');
+  var ids = [];
+  for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) ids.push(boxes[i].value);
+  return ids;
+}
+
+// `selected` of undefined means "keep whatever is ticked now", so a refresh
+// triggered by an unrelated action does not discard an in-progress edit.
+function renderSourcePicker(selected) {
+  var keep = selected === undefined ? selectedSourceIds() : selected;
+  var box = $('pids');
+  box.textContent = '';
+
+  if (ALL_SUBS.length === 0) {
+    var e = document.createElement('span');
+    e.className = 'empty';
+    e.textContent = '还没有订阅源，请先在上方添加';
+    box.appendChild(e);
+    return;
+  }
+
+  // Checked entries render FIRST, in their stored order. Source order is
+  // meaningful - it is the order they are handed to Subconverter and merged -
+  // so opening a profile to edit one field must not silently reshuffle the
+  // rest. Rendering straight from ALL_SUBS would reorder them to list order.
+  var ordered = keep
+    .map(function (id) {
+      for (var i = 0; i < ALL_SUBS.length; i++) if (ALL_SUBS[i].id === id) return ALL_SUBS[i];
+      return null;
+    })
+    .filter(function (s) { return s !== null; })
+    .concat(ALL_SUBS.filter(function (s) { return keep.indexOf(s.id) === -1; }));
+
+  ordered.forEach(function (s) {
+    var label = document.createElement('label');
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = s.id;
+    cb.checked = keep.indexOf(s.id) !== -1;
+    label.appendChild(cb);
+    // A disabled source is still selectable on purpose: an existing profile
+    // may reference one, and silently dropping it on save would change that
+    // profile. The label just makes the situation visible.
+    var text = s.name + (s.enabled ? '' : '（已停用）');
+    if (!s.enabled) label.className = 'off';
+    label.appendChild(document.createTextNode(text));
+    label.title = s.id;
+    box.appendChild(label);
+  });
+}
+
+// Typing a key that already exists loads its settings, so the form shows what
+// is stored rather than looking blank and overwriting everything on save.
+function prefillProfile() {
+  var key = $('pkey').value.trim();
+  if (!key) return;
+  var found = null;
+  for (var i = 0; i < ALL_PROFS.length; i++) if (ALL_PROFS[i].key === key) found = ALL_PROFS[i];
+  if (!found) return;
+
+  $('ptarget').value = found.target;
+  renderTemplatePicker(found.templateId, found.customRuleset);
+  $('pexc').value = found.excludeRemarks || '';
+  $('pudp').checked = found.udp;
+  $('pauto').checked = found.autoUpdate;
+  $('piv').value = found.updateIntervalHours;
+  $('pprefix').checked = found.prefixNodes;
+  $('pgroups').checked = found.sourceGroups;
+  $('pgtype').value = found.sourceGroupType || 'select';
+  $('pgurl').value = found.sourceGroupUrl || '';
+  $('pgint').value = found.sourceGroupInterval;
+  $('pgtol').value = found.sourceGroupTolerance;
+  syncGroupParams();
+  $('pexpand').value = String(found.expand);
+  renderSourcePicker(found.sourceIds);
+  setMsg('已载入现有配置「' + key + '」，保存将覆盖它', '');
+}
+
+// Typing an id that already exists loads that subscription, so the form shows
+// what is stored. Same reason as prefillProfile: POST is a full replace, so a
+// blank-looking form that gets submitted silently overwrites the real values.
+function prefillSubscription() {
+  var id = $('sid').value.trim();
+  if (!id) return;
+  var found = null;
+  for (var i = 0; i < ALL_SUBS.length; i++) if (ALL_SUBS[i].id === id) found = ALL_SUBS[i];
+  if (!found) return;
+
+  $('sname').value = found.name;
+  $('surl').value = found.url;
+  $('sen').checked = found.enabled;
+  setMsg('已载入现有订阅源「' + found.name + '」，保存将覆盖它', '');
+}
+
+/* ------------------------------------------------------------------ *
+ * Source health
+ *
+ * Rendered from ALL_CHECKS, which the monitor fills in the background - so a
+ * row can be showing a result from hours ago. checkedAt is in the tooltip of
+ * the status cell rather than on screen; the point of the column is "is it
+ * working", and a stale-but-green answer is still the honest one until the
+ * next run.
+ * ------------------------------------------------------------------ */
+
+var GIB = 1024 * 1024 * 1024;
+
+function fmtGib(bytes) {
+  return (bytes / GIB).toFixed(1);
+}
+
+function checkFor(sourceId) {
+  for (var i = 0; i < ALL_CHECKS.length; i++) {
+    if (ALL_CHECKS[i].sourceId === sourceId) return ALL_CHECKS[i];
+  }
+  return null;
+}
+
+function statusCell(tr, c) {
+  if (!c) return cell(tr, '未检查', 'mono dim');
+
+  if (!c.ok) {
+    var bad = cell(tr, '✗ 拉取失败', 'mono');
+    bad.title = (c.error || '未知错误') + '\n检查于 ' + c.checkedAt;
+    return bad;
+  }
+
+  var td = cell(tr, '✓ ' + (c.nodeCount === null ? '?' : c.nodeCount) + ' 节点', 'mono');
+  td.title = '检查于 ' + c.checkedAt + (c.latencyMs === null ? '' : '，耗时 ' + c.latencyMs + 'ms');
+  return td;
+}
+
+function quotaCell(tr, c) {
+  // total null means the provider reported no traffic metadata at all, which
+  // is common for a plain node list - not "no quota left".
+  if (!c || c.total === null || c.total <= 0) return cell(tr, '—', 'mono dim');
+
+  var used = (c.upload || 0) + (c.download || 0);
+  var td = cell(tr, fmtGib(Math.max(0, c.total - used)) + ' / ' + fmtGib(c.total) + ' GiB', 'mono');
+  td.title = '已用 ' + fmtGib(used) + ' GiB';
+  return td;
+}
+
+function expiryCell(tr, c) {
+  if (!c || c.expire === null) return cell(tr, '—', 'mono dim');
+
+  var ms = c.expire * 1000;
+  var days = Math.ceil((ms - Date.now()) / 86400000);
+  var text = new Date(ms).toISOString().slice(0, 10);
+
+  if (days <= 0) return cell(tr, text + '（已过期）', 'mono');
+  return cell(tr, text + '（' + days + ' 天）', 'mono');
+}
+
+/* ------------------------------------------------------------------ *
+ * Local templates
+ * ------------------------------------------------------------------ */
+
+function renderTemplates(tbody) {
+  tbody.textContent = '';
+  if (ALL_TEMPLATES.length === 0) {
+    emptyRow(tbody, 4, '还没有本地模板');
+    return;
+  }
+  ALL_TEMPLATES.forEach(function (t) {
+    var tr = document.createElement('tr');
+    cell(tr, t.id, 'mono');
+    cell(tr, t.name, 'mono');
+    cell(tr, t.content.length + ' 字符', 'mono');
+
+    var td = document.createElement('td');
+
+    var edit = document.createElement('button');
+    edit.textContent = '编辑';
+    edit.onclick = function () {
+      $('tid').value = t.id;
+      $('tname').value = t.name;
+      $('tcontent').value = t.content;
+      $('tcontent').classList.add('editing');
+      $('tcontent').scrollIntoView({ block: 'center' });
+      setMsg('正在编辑「' + t.name + '」，保存将覆盖它', '');
+    };
+    td.appendChild(edit);
+
+    var del = document.createElement('button');
+    del.textContent = '删除';
+    del.className = 'danger';
+    del.onclick = function () {
+      // The API refuses while a profile still references it, and its message
+      // names them - so this surfaces which short links to change first.
+      api('DELETE', '/templates/' + encodeURIComponent(t.id))
+        .then(refresh)
+        .then(function () { setMsg('已删除', 'ok'); })
+        .catch(fail);
+    };
+    td.appendChild(del);
+
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  });
+}
+
+function resetTemplateForm() {
+  $('tid').value = '';
+  $('tname').value = '';
+  $('tcontent').value = '';
+  $('tcontent').classList.remove('editing');
+}
+
+/* ------------------------------------------------------------------ *
+ * Template picker
+ *
+ * The profile stores the URL, not a reference to a ruleset row - so this is a
+ * convenience over typing, not a dependency. A URL that is not in the list is
+ * kept via the "自定义…" entry rather than being silently dropped, which
+ * matters for a profile created before the ruleset existed, or one whose
+ * ruleset was deleted.
+ * ------------------------------------------------------------------ */
+
+function pickedTemplate() {
+  var p = document.querySelector('#pcfgs input[type=radio]:checked');
+  return p ? p.value : '';
+}
+
+/**
+ * The profile's two template fields, resolved from one picker.
+ *
+ * They stay mutually exclusive rather than merging into one "template" field:
+ * a local template is an id the database resolves, a remote one is a URL
+ * Subconverter fetches, and only one of them can win. Clearing whichever is
+ * not chosen means the picker always says what will actually be used.
+ */
+function currentTemplateSelection() {
+  var v = pickedTemplate();
+  if (v === '') return { templateId: null, customRuleset: null };
+  if (v === CUSTOM_TEMPLATE) {
+    return { templateId: null, customRuleset: $('pcfg').value.trim() || null };
+  }
+  if (v.indexOf('local:') === 0) return { templateId: v.slice(6), customRuleset: null };
+  return { templateId: null, customRuleset: v };
+}
+
+function syncTemplateInput() {
+  $('pcfg').hidden = pickedTemplate() !== CUSTOM_TEMPLATE;
+}
+
+// Radios rather than a <select>: the options are worth seeing without opening
+// anything, and it reads like the source picker two fields to the left. The
+// single-select part is the point - Subconverter takes one config=, so a
+// checkbox list would imply a combination that does not exist.
+//
+// Local and remote entries share the list, labelled by origin. They resolve
+// differently but serve the same purpose, so splitting them into two controls
+// would only make the choice look bigger than it is.
+function renderTemplatePicker(templateId, customRuleset) {
+  if (templateId === undefined && customRuleset === undefined) {
+    // No arguments means "keep what is picked now", so a refresh triggered by
+    // something else does not discard an in-progress edit.
+    var sel = currentTemplateSelection();
+    templateId = sel.templateId;
+    customRuleset = sel.customRuleset;
+  }
+
+  var pick;
+  if (templateId) {
+    pick = 'local:' + templateId;
+  } else if (customRuleset) {
+    // A URL that is not in the list lands on 自定义…, so an unknown template
+    // survives the next save instead of being dropped.
+    var known = ALL_RULESETS.some(function (r) { return r.url === customRuleset; });
+    pick = known ? customRuleset : CUSTOM_TEMPLATE;
+  } else {
+    pick = '';
+  }
+
+  var choices = [{ value: '', label: '不使用' }];
+  ALL_TEMPLATES.forEach(function (t) {
+    choices.push({ value: 'local:' + t.id, label: t.name + '（本地）', title: t.id });
+  });
+  ALL_RULESETS.forEach(function (r) {
+    choices.push({ value: r.url, label: r.name + '（远程）', title: r.url });
+  });
+  choices.push({ value: CUSTOM_TEMPLATE, label: '自定义 URL…' });
+
+  var box = $('pcfgs');
+  box.textContent = '';
+  choices.forEach(function (c) {
+    var label = document.createElement('label');
+    var input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'template-choice';
+    input.value = c.value;
+    input.checked = c.value === pick;
+    if (c.title) label.title = c.title;
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(c.label));
+    box.appendChild(label);
+  });
+
+  $('pcfg').value = pick === CUSTOM_TEMPLATE ? (customRuleset || '') : '';
+  syncTemplateInput();
+}
+
+function renderRulesets(tbody) {
+  tbody.textContent = '';
+  if (ALL_RULESETS.length === 0) {
+    emptyRow(tbody, 4, '还没有规则模板');
+    return;
+  }
+  ALL_RULESETS.forEach(function (r) {
+    var tr = document.createElement('tr');
+    cell(tr, r.id, 'mono');
+    cell(tr, r.name, 'mono');
+    cell(tr, r.url, 'mono');
+    deleteButton(tr, '/rulesets/' + encodeURIComponent(r.id));
+    tbody.appendChild(tr);
+  });
+}
+
+/**
+ * Shows a profile's template by NAME when it matches a managed ruleset, so the
+ * list answers "which template is this short link using" without opening it.
+ *
+ * Falls back to the URL for one that is not in the list - a deleted ruleset, or
+ * a profile that predates it - because showing a dash there would read as "no
+ * template" when there is one.
+ */
+function templateCell(tr, url) {
+  var td = document.createElement('td');
+  if (!url) {
+    td.textContent = '—';
+    td.className = 'none';
+  } else {
+    var name = null;
+    for (var i = 0; i < ALL_RULESETS.length; i++) {
+      if (ALL_RULESETS[i].url === url) { name = ALL_RULESETS[i].name; break; }
+    }
+    td.textContent = name || url;
+    td.title = name ? name + '\n' + url : url;
+    td.className = 'mono tpl';
+  }
+  tr.appendChild(td);
+  return td;
+}
+
+/**
+ * Probe settings only apply to the testing group types. Hidden rather than
+ * disabled for select, so the form does not imply they do something.
+ */
+function syncGroupParams() {
+  var testing = $('pgtype').value !== 'select';
+  $('pgurl').hidden = !testing;
+  $('pgint-wrap').hidden = !testing;
+  $('pgtol-wrap').hidden = !testing;
+  $('pgurl').placeholder = testing ? 'http://www.google.com/generate_204（留空用默认）' : '';
+}
+
+$('pgtype').onchange = syncGroupParams;
+
+function prefillRuleset() {  var id = $('rid').value.trim();
+  if (!id) return;
+  var found = null;
+  for (var i = 0; i < ALL_RULESETS.length; i++) if (ALL_RULESETS[i].id === id) found = ALL_RULESETS[i];
+  if (!found) return;
+
+  $('rname').value = found.name;
+  $('rurl').value = found.url;
+  setMsg('已载入现有规则模板「' + found.name + '」，保存将覆盖它', '');
+}
+
+function refresh() {
+  return Promise.all([
+    api('GET', '/subscriptions'),
+    api('GET', '/profiles'),
+    api('GET', '/rulesets'),
+    api('GET', '/sources/health'),
+    api('GET', '/templates')
+  ]).then(function (res) {
+    var subs = res[0].data;
+    var profs = res[1].data;
+    var rules = res[2].data;
+
+    ALL_SUBS = subs;
+    ALL_PROFS = profs;
+    ALL_RULESETS = rules;
+    ALL_CHECKS = res[3].data;
+    ALL_TEMPLATES = res[4].data;
+    renderSourcePicker();
+    // Also repopulates the profile form's dropdown, so a template added since
+    // the last load is immediately selectable.
+    renderTemplatePicker();
+
+    var st = $('st').tBodies[0];
+    st.textContent = '';
+    if (subs.length === 0) {
+      emptyRow(st, 8, '还没有订阅源');
+    } else {
+      subs.forEach(function (s) {
+        var tr = document.createElement('tr');
+        var c = checkFor(s.id);
+        cell(tr, s.id, 'mono');
+        cell(tr, s.name, 'mono');
+        cell(tr, s.url, 'mono tpl');
+        enabledCell(tr, s);
+        statusCell(tr, c);
+        quotaCell(tr, c);
+        expiryCell(tr, c);
+        deleteButton(tr, '/subscriptions/' + encodeURIComponent(s.id));
+        // The severity comes from the server, so the row colour and the log
+        // line always agree about the same result.
+        if (c && c.level === 'error') tr.className = 'lvl-err';
+        else if (c && c.level === 'warn') tr.className = 'lvl-warn';
+        st.appendChild(tr);
+      });
+    }
+
+    var pt = $('pt').tBodies[0];
+    pt.textContent = '';
+    if (profs.length === 0) {
+      emptyRow(pt, 10, '还没有短链配置');
+    } else {
+      profs.forEach(function (p) {
+        var tr = document.createElement('tr');
+        cell(tr, p.key, 'mono');
+        cell(tr, p.target, 'mono');
+        cell(tr, p.sourceIdsValid ? (p.sourceIds.length ? p.sourceIds.join(', ') : '（无）') : 'JSON 损坏', 'mono');
+        templateCell(tr, p.customRuleset);
+        cell(tr, p.udp ? '是' : '否', 'mono');
+        cell(tr, String(p.expand), 'mono');
+        cell(tr, p.autoUpdate ? p.updateIntervalHours + ' 小时' : '不更新', 'mono');
+        cell(tr, p.prefixNodes ? '是' : '否', 'mono');
+        if (!p.sourceIdsValid) tr.className = 'invalid';
+        linkCell(tr, '/s/' + encodeURIComponent(p.key));
+        deleteButton(tr, '/profiles/' + encodeURIComponent(p.key));
+        pt.appendChild(tr);
+      });
+    }
+
+    renderRulesets($('rt').tBodies[0]);
+    renderTemplates($('tt').tBodies[0]);
+
+    setMsg('订阅源 ' + subs.length + ' 个，规则模板 ' + rules.length + ' 个，本地模板 ' +
+           ALL_TEMPLATES.length + ' 个，短链配置 ' + profs.length + ' 个', 'ok');
+  }).catch(fail);
+}
+
+TARGETS.forEach(function (t) {
+  var o = document.createElement('option');
+  o.value = t;
+  o.textContent = t;
+  $('ptarget').appendChild(o);
+});
+
+$('save').onclick = function () {
+  localStorage.setItem(TOKEN_KEY, $('tok').value.trim());
+  refresh();
+};
+
+// Each source is converted in turn, so this takes a few seconds per source -
+// hence disabling the button rather than leaving it looking idle.
+$('checknow').onclick = function () {
+  var btn = $('checknow');
+  btn.disabled = true;
+  btn.textContent = '检查中…';
+  setMsg('正在逐个检查订阅源，请稍候', '');
+  api('POST', '/sources/check')
+    .then(function (res) {
+      setMsg('检查完成，共 ' + res.data.length + ' 个源', 'ok');
+      return refresh();
+    })
+    .catch(fail)
+    .then(function () {
+      btn.disabled = false;
+      btn.textContent = '立即检查';
+    });
+};
+
+$('pkey').onchange = prefillProfile;
+$('sid').onchange = prefillSubscription;
+$('rid').onchange = prefillRuleset;
+
+// Delegated, because the radios are rebuilt on every render and the container
+// is not.
+$('pcfgs').addEventListener('change', function () {
+  syncTemplateInput();
+  if (pickedTemplate() === CUSTOM_TEMPLATE) $('pcfg').focus();
+});
+
+$('rf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var body = { name: $('rname').value.trim(), url: $('rurl').value.trim() };
+  var id = $('rid').value.trim();
+  if (id) body.id = id;
+  api('POST', '/rulesets', body)
+    .then(function () {
+      $('rid').value = ''; $('rname').value = ''; $('rurl').value = '';
+      refresh();
+    })
+    .catch(fail);
+};
+
+$('tf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var content = $('tcontent').value;
+  if (content.trim() === '') {
+    setMsg('模板内容不能为空', 'err');
+    return;
+  }
+  var body = { name: $('tname').value.trim(), content: content };
+  var id = $('tid').value.trim();
+  if (id) body.id = id;
+
+  api('POST', '/templates', body)
+    .then(function (res) {
+      // Stay on what was just written instead of clearing the form. The id is
+      // filled in from the saved row, so the next save updates this template
+      // rather than creating a second one - which is what "edit one more line"
+      // should mean.
+      $('tid').value = res.data.id;
+      $('tname').value = res.data.name;
+      $('tcontent').value = res.data.content;
+      $('tcontent').classList.add('editing');
+      refresh();
+      setMsg('已保存，可继续修改；要建新的点「新建」', 'ok');
+    })
+    .catch(fail);
+};
+
+$('tnew').onclick = function () {
+  resetTemplateForm();
+  setMsg('已清空，保存将新建一个模板', '');
+};
+
+$('sf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var body = { name: $('sname').value.trim(), url: $('surl').value.trim(), enabled: $('sen').checked };
+  var id = $('sid').value.trim();
+  if (id) body.id = id;
+  api('POST', '/subscriptions', body)
+    .then(function () {
+      // Clear the whole form, not just the id: leaving a stale name and url
+      // behind is how you accidentally re-submit them against a new id.
+      $('sid').value = ''; $('sname').value = ''; $('surl').value = '';
+      $('sen').checked = true;
+      refresh();
+    })
+    .catch(fail);
+};
+
+$('pf').onsubmit = function (ev) {
+  ev.preventDefault();
+  var ids = selectedSourceIds();
+  if (ids.length === 0) {
+    setMsg('请至少勾选一个订阅源', 'err');
+    return;
+  }
+  var sel = currentTemplateSelection();
+  var body = {
+    key: $('pkey').value.trim(),
+    target: $('ptarget').value,
+    sourceIds: ids,
+    // Exactly one of these is ever set - see currentTemplateSelection.
+    customRuleset: sel.customRuleset,
+    templateId: sel.templateId,
+    excludeRemarks: $('pexc').value.trim() || null,
+    udp: $('pudp').checked,
+    autoUpdate: $('pauto').checked,
+    // Falls back to 24 rather than letting an empty or NaN field through; the
+    // API would reject it anyway, and this is the value the header used before
+    // it was configurable.
+    updateIntervalHours: parseInt($('piv').value, 10) || 24,
+    prefixNodes: $('pprefix').checked,
+    sourceGroups: $('pgroups').checked,
+    sourceGroupType: $('pgtype').value,
+    // Empty means "use the built-in default", not "probe an empty URL".
+    sourceGroupUrl: $('pgurl').value.trim() || null,
+    sourceGroupInterval: parseInt($('pgint').value, 10) || 300,
+    sourceGroupTolerance: parseInt($('pgtol').value, 10) || 0,
+    expand: $('pexpand').value === 'true'
+  };
+  api('POST', '/profiles', body).then(function (res) {
+    // A warning is not a failure - the write succeeded - but it is the most
+    // likely cause of a later 502, so surface it instead of saying "saved".
+    if (res && res.warnings && res.warnings.length) { setMsg(res.warnings.join('; '), 'err'); }
+    refresh();
+  }).catch(fail);
+};
+
+$('tok').value = token();
+if (token()) { refresh(); } else { setMsg('请先填入 ADMIN_TOKEN'); }
+</script>
+</body>
+</html>

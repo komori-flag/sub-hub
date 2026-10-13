@@ -1,0 +1,10 @@
+{
+  "//": "Type-checks src/ AND test/ together. The build config (tsconfig.json) is",
+  "//2": "src-only because rootDir must be src for `node dist/index.js` to resolve.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

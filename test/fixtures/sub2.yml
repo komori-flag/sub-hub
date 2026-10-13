@@ -1,0 +1,2 @@
+proxies:
+  - {name: TEST-B1, type: ss, server: 127.0.0.1, port: 8390, cipher: aes-256-gcm, password: testpw}

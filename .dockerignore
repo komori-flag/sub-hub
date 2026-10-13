@@ -1,0 +1,22 @@
+# data/ matters most: without it a developer's local SQLite file (plus its
+# -wal/-shm siblings) is baked into an image layer and can silently seed a
+# stale schema into a deployment.
+node_modules
+dist
+data
+test
+
+# .env must never enter an image - it holds ADMIN_TOKEN.
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+*.log
+npm-debug.log*
+.vscode
+.idea
+coverage
+docker-compose.yml
+README.md

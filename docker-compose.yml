@@ -1,0 +1,144 @@
+# NOTE: no top-level `version:` key. It was removed from the Compose
+# Specification - Compose V2 selects the schema itself and only prints
+# "the attribute 'version' is obsolete" on every invocation.
+
+name: sub-hub
+
+services:
+  app:
+    build: .
+    image: sub-hub:latest
+    container_name: sub-manager-app
+    restart: always
+    # tini as PID 1: reaps zombies and forwards signals cleanly.
+    init: true
+    ports:
+      # 0.0.0.0 keeps the previous behaviour. On a public host set
+      # APP_BIND_ADDR=127.0.0.1 in .env instead - the Cloudflare Tunnel works
+      # over the compose network and needs no published port, so binding to
+      # loopback removes the app from the internet's reach entirely.
+      #
+      # This lives here rather than in docker-compose.prod.yml because Compose
+      # CONCATENATES `ports` across files instead of replacing them, so an
+      # overlay listing "127.0.0.1:3000:3000" would produce two mappings and a
+      # port conflict.
+      - "${APP_BIND_ADDR:-0.0.0.0}:3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_PATH: /app/data/sub.db
+      SUBCONVERTER_URL: http://subconverter:25500
+      CONVERTER_TIMEOUT_MS: "20000"
+      # Bounds concurrent Subconverter conversions. Requests beyond this queue
+      # (8x this value) and are shed with 503 SERVER_BUSY once it is full.
+      MAX_CONCURRENT_CONVERSIONS: "8"
+      # Must match API_TOKEN below. Sent as &token= on every /sub request.
+      # Leave empty if you have not enabled API_MODE on subconverter.
+      SUBCONVERTER_TOKEN: "${SUBCONVERTER_TOKEN:-}"
+      # Fails `docker compose up` with this message if .env has no token.
+      # This is the first layer of the fail-closed design; src/index.ts is
+      # the second (it exits 1 on a missing or short token).
+      #   cp .env.example .env && openssl rand -hex 32
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?set ADMIN_TOKEN in .env (cp .env.example .env)}"
+    volumes:
+      # BIND MOUNT, per the original spec. On Linux the container runs as uid
+      # 1000 (node) and the host directory's ownership wins, so a fresh
+      # `mkdir data` owned by root gives SQLITE_CANTOPEN on first write.
+      # Fix:  sudo chown -R 1000:1000 ./data
+      # Or replace this line with a named volume, which seeds ownership from
+      # the image and therefore just works:   subhub-data:/app/data
+      # Windows / Docker Desktop: not an issue, no action needed.
+      - ./data:/app/data
+    depends_on:
+      - subconverter
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  subconverter:
+    # Mutable tag. Pin to a digest (or a version tag) before this goes
+    # anywhere real - Subconverter's target list and parameter handling have
+    # changed across releases, and a silent upgrade changes the YAML your
+    # clients consume.
+    image: tindy2013/subconverter:latest
+    container_name: subconverter
+    restart: always
+    environment:
+      # Defence in depth. The compose network already keeps this unreachable
+      # from the host and the internet, but the token is what limits WHICH
+      # container may use it - any container on the same network can reach any
+      # other, so the bind address alone cannot express "only sub-hub".
+      #
+      # Enable by setting SUBCONVERTER_TOKEN in .env. It is passed to both
+      # services from that single variable, so they cannot drift apart.
+      #
+      # API_MODE is DERIVED from the token rather than being its own switch,
+      # so the two cannot drift. Setting a token turns enforcement on; leaving
+      # it empty turns it off. A separate SUBCONVERTER_API_MODE variable would
+      # let you set a token and forget the flag, which fails silently as
+      # "no protection" while looking protected.
+      #
+      # Verify it took effect after enabling:
+      #   docker compose exec subconverter \
+      #     wget -qO- 'http://127.0.0.1:25500/sub?target=clash&url=https://example.com' | head -3
+      # That should be refused or return an error. If it returns a config,
+      # the token is NOT being enforced.
+      API_MODE: "${SUBCONVERTER_TOKEN:+true}"
+      API_TOKEN: "${SUBCONVERTER_TOKEN:-}"
+    # No published port, deliberately. The app reaches it at
+    # http://subconverter:25500 over the compose network by service name.
+    # Subconverter's /sub?url= accepts ANY url and fetches it server-side -
+    # it is an SSRF primitive by design - so publishing 25500 hands that to
+    # every device on your LAN. Uncomment for debugging only, bound to
+    # loopback:
+    # ports:
+    #   - "127.0.0.1:25500:25500"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+    # OPTIONAL health gate. Verify the probe binary exists first - this image
+    # is minimal and may not ship wget:
+    #   docker compose exec subconverter wget -qO- http://127.0.0.1:25500/version
+    #
+    # Left off by default because a health-gated dependency is only as
+    # reliable as the probe, and the failure mode is strictly worse: if the
+    # probe never passes, `docker compose up` reports "dependency failed to
+    # start" and you get NO app at all, including /admin. The app does not
+    # touch Subconverter at boot - it only fetches on an incoming /s/:key,
+    # and a cold Subconverter yields a clean 502 the client can retry.
+    #
+    # If the probe works and you want the stricter gate, uncomment this AND
+    # change `depends_on` above to:
+    #   subconverter:
+    #     condition: service_healthy
+    # healthcheck:
+    #   test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:25500/version >/dev/null 2>&1 || exit 1"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 10s
+
+  # Optional: publishes the app over Cloudflare Tunnel - TLS, no inbound ports,
+  # no router changes. Enable with:
+  #     docker compose --profile tunnel up -d
+  # Create the tunnel in the Cloudflare dashboard (Zero Trust -> Networks ->
+  # Tunnels), point its public hostname at  http://app:3000 , and put the token
+  # it gives you in .env as TUNNEL_TOKEN.
+  #
+  # Note this points at the SERVICE NAME, not a published port - which is why
+  # you can drop the `ports:` mapping on `app` entirely on a public host.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: sub-hub-tunnel
+    restart: always
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - app
+    profiles: [tunnel]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+# volumes:
+#   subhub-data:

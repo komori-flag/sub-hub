@@ -1,0 +1,30 @@
+# VPS deployment overlay: runs the image published by the Release workflow
+# instead of building on the server.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# or, to pin a version (recommended - `latest` is mutable and a redeploy would
+# silently change what you are running):
+#
+#   IMAGE_TAG=v1.0.0 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# To avoid retyping -f flags, put this in .env and just use `docker compose up`:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml
+#
+# NOTE: `pull` before `up`. The base file still declares `build:`, so if the
+# image is not present locally compose would fall back to building it - which
+# is exactly the slow, memory-hungry path this overlay exists to avoid.
+
+services:
+  app:
+    # Change the owner/repo to match yours. This is the same name the Release
+    # workflow derives from ${GITHUB_REPOSITORY}.
+    image: ${SUBHUB_IMAGE:-ghcr.io/komori-flag/sub-hub}:${IMAGE_TAG:-latest}
+
+    # For a PUBLIC host, also set this in .env so the app port is not reachable
+    # from the internet - the Cloudflare Tunnel goes over the compose network
+    # and does not need a published port at all:
+    #   APP_BIND_ADDR=127.0.0.1
+    # Anything that still needs the raw port (local debugging, a LAN client)
+    # keeps working through the loopback binding.
